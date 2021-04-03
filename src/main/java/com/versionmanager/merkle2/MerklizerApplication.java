@@ -59,7 +59,7 @@ public class MerklizerApplication {
                     count++;
                 }
                 EventsVersion eventsVersion = eventsVersionRepository.findTop80ByEventStoreIdOrderByCreatedDateDesc(EventStoreCreator.getEvenStoreId()).get(56);
-                System.out.println(merkleService.getUpdates(EventStoreCreator.getEvenStoreId(),eventsVersion.getId()).getUpdated().size());
+                System.out.println(merkleService.getUpdates(EventStoreCreator.getEvenStoreId(),eventsVersion.getId()+1).getUpdated().size());
             }
         };
     }

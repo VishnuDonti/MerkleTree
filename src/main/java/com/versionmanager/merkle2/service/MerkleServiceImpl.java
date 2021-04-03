@@ -191,17 +191,18 @@ public class MerkleServiceImpl implements IMerkleService {
         Optional<EventsVersion> givenEventsVersion = eventsVersionRepository.findByEventStoreIdAndId(eventsStoreId, versionId);
         if(!givenEventsVersion.isPresent()) {
             Difference difference = new Difference();
-            difference.setUpdated(eventsStoreRepository.findEventsIdById(eventsStoreId).get());
+            difference.setUpdated(eventsStoreRepository.findEventIdById(eventsStoreId).get().getEvents().stream().filter(x -> !x.isRemoved()).map(y -> y.getId()).collect(Collectors.toList()));
             difference.setVersionId(latestEventsVersion.get().getId());
+            return difference;
         }
         List<Short> latestVersionInfo = (List<Short>) SerializationUtils.deserialize(latestEventsVersion.get().getVersionInfo());
         List<Short> givenVersionInfo = (List<Short>) SerializationUtils.deserialize(givenEventsVersion.get().getVersionInfo());
         MerkleTree latestVersion = constructTree(latestVersionInfo, latestEventsVersion.get().getLeavesCount());
         MerkleTree givenVersion = constructTree(givenVersionInfo, givenEventsVersion.get().getLeavesCount());
-        return compare(givenVersion,latestVersion);
+        return compare(givenVersion,latestVersion,eventsStoreId);
     }
 
-    private Difference compare(MerkleTree givenVersion, MerkleTree latestVersion) {
+    private Difference compare(MerkleTree givenVersion, MerkleTree latestVersion,String eventsStoreId) {
         int latestVersionLevels  = levels(latestVersion.getLeavesCount());
         int givenVersionLevels  = levels(givenVersion.getLeavesCount());
         int levelDifference = latestVersionLevels-givenVersionLevels;
@@ -216,10 +217,11 @@ public class MerkleServiceImpl implements IMerkleService {
         }
         compareLevelTree(givenVersion.getRoot(), latestVersionRoot,indexes);
         Difference difference = new Difference();
+        MatchOperation selectCustomer = Aggregation.match(Criteria.where("_id").is(eventsStoreId));
         UnwindOperation unwindOperation = Aggregation.unwind("events", "indexOfElement");
         MatchOperation matchOperation = Aggregation.match(Criteria.where("indexOfElement").in(indexes));
         ProjectionOperation project = Aggregation.project().and("events._id").as("eventId").andExclude("_id").and("events.removed").as("eventRemoved");
-        List<Document> documents = mongoTemplate.aggregate(Aggregation.newAggregation(unwindOperation,matchOperation,project),"EventsStore",Document.class).getMappedResults();
+        List<Document> documents = mongoTemplate.aggregate(Aggregation.newAggregation(selectCustomer,unwindOperation,matchOperation,project),"EventsStore",Document.class).getMappedResults();
         List<String> deletedIds = new ArrayList<>();
         List<String> updatedIds = new ArrayList<>();
         documents.stream().forEach( y -> {

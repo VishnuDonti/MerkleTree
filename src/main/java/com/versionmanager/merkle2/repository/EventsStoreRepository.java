@@ -13,6 +13,6 @@ import java.util.Optional;
 @Repository
 public interface EventsStoreRepository extends MongoRepository<EventsStore,String> {
 
-    Optional<List<String>> findEventsIdById(String id);
+    Optional<EventsStore> findEventIdById(String id);
 
 }
