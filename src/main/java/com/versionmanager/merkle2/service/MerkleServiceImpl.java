@@ -112,7 +112,6 @@ public class MerkleServiceImpl implements IMerkleService {
         } else {
             leavesCount++;
             double levels = log2(uniqueMappedResult.getInteger(NUMBER_OF_EVENTS));
-            desrializedVersionInfo.add((short)0);
             if (levels - Math.floor(levels) == 0) {
                 // Add a new level
                 int upperLevelIndex = (desrializedVersionInfo.size()-1)/2 ;
@@ -132,11 +131,12 @@ public class MerkleServiceImpl implements IMerkleService {
                 }
                 desrializedVersionInfo.set(upperLevelIndex, (short)(desrializedVersionInfo.get(upperLevelIndex) + 1));
             }
+            desrializedVersionInfo.add((short)0);
             Update update = new Update();
             update.addToSet(EVENTS, event);
             mongoTemplate.updateFirst(Query.query(Criteria.where("_id").is(eventStoreId)), update, EVENTS_STORE);
         }
-        System.out.println(desrializedVersionInfo);
+        System.out.println(desrializedVersionInfo.size());
         // Create a new version
         EventsVersion eventsVersion1 = new EventsVersion();
         eventsVersion1.setCreatedDate(new Date());

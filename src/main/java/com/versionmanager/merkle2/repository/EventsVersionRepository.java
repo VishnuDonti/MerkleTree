@@ -19,6 +19,8 @@ public interface EventsVersionRepository extends MongoRepository<EventsVersion,S
 
     List<EventsVersion> findTop80ByEventStoreIdOrderByCreatedDateDesc(String eventStoreId);
 
+    List<EventsVersion> findTop88ByEventStoreIdOrderByCreatedDateDesc(String eventStoreId);
+
     Optional<EventsVersion> findByEventStoreIdAndId(String eventStoreId, String id);
 
 }

@@ -50,16 +50,16 @@ public class MerklizerApplication {
             public void onApplicationEvent(ApplicationReadyEvent event) {
                 eventsVersionRepository.deleteAll();
                 eventsStoreRepository.deleteAll();
-                List<Event> events = EventStoreCreator.createEvents(1, 88);
+                List<Event> events = EventStoreCreator.createEvents(1, 50);
                 merkleService.constructVersion(EventStoreCreator.getEvenStoreId(),events);
-                int count = 2;
-                while(count <= 88) {
+                int count = 36;
+                while(count <= 60) {
                     Event event1 = EventStoreCreator.createEvents(count+1, count + 2).get(0);
                     merkleService.updateOrAddEvent(event1, EventStoreCreator.getEvenStoreId());
                     count++;
                 }
-                EventsVersion eventsVersion = eventsVersionRepository.findTop80ByEventStoreIdOrderByCreatedDateDesc(EventStoreCreator.getEvenStoreId()).get(56);
-                System.out.println(merkleService.getUpdates(EventStoreCreator.getEvenStoreId(),eventsVersion.getId()+1).getUpdated().size());
+                EventsVersion eventsVersion = eventsVersionRepository.findTop88ByEventStoreIdOrderByCreatedDateDesc(EventStoreCreator.getEvenStoreId()).get(22);
+                System.out.println(merkleService.getUpdates(EventStoreCreator.getEvenStoreId(),eventsVersion.getId()).getUpdated().size());
             }
         };
     }
