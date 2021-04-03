@@ -10,6 +10,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -18,11 +19,13 @@ import java.util.stream.IntStream;
 public class MerleTreeTester {
 
     public static void main(String[] args) throws IOException, InterruptedException {
-        List<Node> leafs = IntStream.rangeClosed(1, 30).mapToObj(MerleTreeTester::applyAsInt).collect(Collectors.toList()).stream().map(MerkleTreeHelper::getNode).collect(Collectors.toList());
-        long time = System.currentTimeMillis();
+        List<Node> leafs = IntStream.rangeClosed(1, 16000).mapToObj(MerleTreeTester::applyAsInt).collect(Collectors.toList()).stream().map(MerkleTreeHelper::getNode).collect(Collectors.toList());
+        StopWatch stopWatch = new StopWatch();
+        stopWatch.start();
         MerkleTree merkleTree = MerkleTreeHelper.constructTree(leafs);
-        long end = System.currentTimeMillis();
-
+        stopWatch.stop();
+        System.out.println("---- Time taken to Construct Tree ----"+stopWatch.getTime() + "---- Time taken to Construct Tree ---");
+        stopWatch.reset();
         IntStream.rangeClosed(51, 16800).forEach(x -> MerkleTreeHelper.updateTree(MerkleTreeHelper.getNode(applyAsInt(x)), merkleTree));
         MerkleTreeHelper.updateTree(MerkleTreeHelper.getNode(applyAsInt(30, true)), merkleTree);
         MerkleTreeHelper.updateTree(MerkleTreeHelper.getNode(applyAsInt(3, true)), merkleTree);
@@ -50,9 +53,11 @@ public class MerleTreeTester {
         kryo.register(Hash.class);
         kryo.setReferences(true);
         kryo.register(Deleted.class);
-        StopWatch stopWatch = new StopWatch();
+        kryo.register(LinkedList.class);
+
         stopWatch.start();
         Output output = new Output(new FileOutputStream("file.txt"));
+
         kryo.writeObject(output, merkleTree);
         output.close();
        // byte[] bytes = SerializationUtils.serialize(merkleTree);
@@ -78,10 +83,10 @@ public class MerleTreeTester {
         System.out.println("---- Time taken to Deserialize    ----"+stopWatch.getTime() + "---- Time taken to Deserialize ---");
         stopWatch.reset();
         stopWatch.start();
-        Difference difference = MerkleTreeHelper.getUpdates(merkleTree, merkleTree.getRoot().get(15300).getHashList().stream().filter(x -> x.getRootIndex() == 15300).findFirst().orElse(null).getHashValue());
+        Difference difference = MerkleTreeHelper.getUpdates(merkleTree, merkleTree.getRoot().get(1725).getHashList().stream().filter(x -> x.getRootIndex() == 1725).findFirst().orElse(null).getHashValue());
         stopWatch.stop();
         System.out.println(difference.getUpdated().size());
-        System.out.println(difference.getDeleted());
+        System.out.println(difference.getDeleted().size());
         System.out.println("---- Time taken to Calculate Diff ----" + stopWatch.getTime() + "---- Time taken to Calculate Diff ---");
     }
 
