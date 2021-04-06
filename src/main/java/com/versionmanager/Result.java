@@ -41,7 +41,6 @@ class Result {
                 contents.addAll(getResult1(author, param2).getContent());
             }
 
-
             titles.addAll(contents.stream().sorted().filter( y1 -> !(((y1.getTitle() == null || y1.getTitle().equals("") )&&
                     (y1.getLink() == null ||y1.getLink().equals(""))))).map(y -> {
                 String title =y.getTitle();

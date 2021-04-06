@@ -41,30 +41,30 @@ public class MerkleServiceImpl implements IMerkleService {
 
     private MerkleTree constructTree(List<Short> versionInfo, int leavesCount) {
         Function<Short, Node> convertToNode = (x) -> new Node(x);
-        int k = versionInfo.size()-leavesCount;
+        int k = versionInfo.size() - leavesCount;
         Node root = convertToNode.apply(versionInfo.get(0));
-        Map<Integer,Node>  tempHolder = new HashMap<>();
-        tempHolder.put(0,root);
+        Map<Integer, Node> tempHolder = new HashMap<>();
+        tempHolder.put(0, root);
         int indexOfLeaf = 0;
-        for (int i = 0; i < k ; i++) {
+        for (int i = 0; i < k; i++) {
             int leftIndex = (2 * i) + 1;
             int rightIndex = (2 * i) + 2;
-            int parentIndex = leftIndex / 2 ;
-            if(versionInfo.size() > leftIndex) {
+            int parentIndex = leftIndex / 2;
+            if (versionInfo.size() > leftIndex) {
                 Node left = convertToNode.apply(versionInfo.get(leftIndex));
-                if(leftIndex >= k) {
+                if (leftIndex >= k) {
                     left.setIndex(indexOfLeaf++);
                 }
                 tempHolder.get(parentIndex).setLeft(left);
-                tempHolder.put(leftIndex,left);
+                tempHolder.put(leftIndex, left);
             }
-            if(versionInfo.size() >  rightIndex) {
+            if (versionInfo.size() > rightIndex) {
                 Node right = convertToNode.apply(versionInfo.get(rightIndex));
-                if(rightIndex >= k) {
+                if (rightIndex >= k) {
                     right.setIndex(indexOfLeaf++);
                 }
                 tempHolder.get(parentIndex).setRight(right);
-                tempHolder.put(rightIndex,right);
+                tempHolder.put(rightIndex, right);
             }
             tempHolder.remove(parentIndex);
         }
@@ -82,7 +82,7 @@ public class MerkleServiceImpl implements IMerkleService {
         MatchOperation matchOperation = Aggregation.match(Criteria.where("_id").is(eventStoreId));
         ArrayOperators.IndexOfArray indexOfArray = ArrayOperators.IndexOfArray.arrayOf(EVENTS_ID).indexOf(event.getId())
                 .within(Range.from(Range.Bound.inclusive(0l)).to(Range.Bound.unbounded()));
-        ProjectionOperation indexOfElement = Aggregation.project().and(indexOfArray).as(INDEX_OF_EVENT).and(ArrayOperators.Size.lengthOfArray(EVENTS)).as(NUMBER_OF_EVENTS);
+        ProjectionOperation indexOfElement = Aggregation.project("latestVersion").and(indexOfArray).as(INDEX_OF_EVENT).and(ArrayOperators.Size.lengthOfArray(EVENTS)).as(NUMBER_OF_EVENTS);
         AggregationResults<Document> integerAggregationResults = mongoTemplate.aggregate(Aggregation.newAggregation(matchOperation, indexOfElement), EVENTS_STORE, Document.class);
         Document uniqueMappedResult = integerAggregationResults.getUniqueMappedResult();
 
@@ -91,59 +91,67 @@ public class MerkleServiceImpl implements IMerkleService {
             return;
         }
         //  DB Call 2
-        Optional<EventsVersion> eventsStoreRepositoryById = eventsVersionRepository.findTop1ByEventStoreIdOrderByCreatedDateDesc(eventStoreId);
+        Optional<EventsVersion> eventsStoreRepositoryById = eventsVersionRepository.findById((String)uniqueMappedResult.get("latestVersion"));
         EventsVersion eventsVersion = eventsStoreRepositoryById.get();
         int leavesCount = eventsVersion.getLeavesCount();
         List<Short> desrializedVersionInfo = (List<Short>) SerializationUtils.deserialize(eventsVersion.getVersionInfo());
-        int indexOfGivenEvent = ((int) (Math.pow(2, levels(desrializedVersionInfo.size())-1) + (Integer) uniqueMappedResult.get(INDEX_OF_EVENT))-1);
+        int indexOfGivenEvent = ((int) (Math.pow(2, levels(desrializedVersionInfo.size()) - 1) + (Integer) uniqueMappedResult.get(INDEX_OF_EVENT)) - 1);
         // Updating an existing event
-        if((Integer)uniqueMappedResult.get(INDEX_OF_EVENT) != -1) {
-            desrializedVersionInfo.set(indexOfGivenEvent, (short)(desrializedVersionInfo.get(indexOfGivenEvent) + 1));
-            int upperLevelIndex = (indexOfGivenEvent-1)/2;
+        if ((Integer) uniqueMappedResult.get(INDEX_OF_EVENT) != -1) {
+            desrializedVersionInfo.set(indexOfGivenEvent, (short) (desrializedVersionInfo.get(indexOfGivenEvent) + 1));
+            int upperLevelIndex = (indexOfGivenEvent - 1) / 2;
             while (upperLevelIndex > 0) {
-                desrializedVersionInfo.set(upperLevelIndex, (short)(desrializedVersionInfo.get(upperLevelIndex) + 1));
-                upperLevelIndex = (upperLevelIndex-1) / 2;
+                desrializedVersionInfo.set(upperLevelIndex, (short) (desrializedVersionInfo.get(upperLevelIndex) + 1));
+                upperLevelIndex = (upperLevelIndex - 1) / 2;
             }
-            desrializedVersionInfo.set(upperLevelIndex, (short)(desrializedVersionInfo.get(upperLevelIndex) + 1));
+            desrializedVersionInfo.set(upperLevelIndex, (short) (desrializedVersionInfo.get(upperLevelIndex) + 1));
+
+            // Create a new version
+            EventsVersion eventsVersion1 = new EventsVersion();
+            eventsVersion1.setCreatedDate(new Date());
+            eventsVersion1.setLeavesCount(leavesCount);
+            eventsVersion1.setEventStoreId(eventStoreId);
+            eventsVersion1.setVersionInfo(SerializationUtils.serialize(desrializedVersionInfo));
+            EventsVersion storedEventsVersion = eventsVersionRepository.save(eventsVersion1);
 
             // DB Call 3
-            Update update = new Update().set("events.$.hash", event.getHash()).set("events.$.removed",event.isRemoved());
+            Update update = new Update().set("events.$.hash", event.getHash()).set("events.$.removed", event.isRemoved()).set("latestVersion", storedEventsVersion.getId());
             mongoTemplate.updateFirst(Query.query(Criteria.where("_id").is(eventStoreId).and(EVENTS_ID).is(event.getId())), update, EVENTS_STORE);
         } else {
             leavesCount++;
             double levels = log2(uniqueMappedResult.getInteger(NUMBER_OF_EVENTS));
             if (levels - Math.floor(levels) == 0) {
                 // Add a new level
-                int upperLevelIndex = (desrializedVersionInfo.size()-1)/2 ;
+                int upperLevelIndex = (desrializedVersionInfo.size() - 1) / 2;
                 while (upperLevelIndex > 0) {
-                    int numberOfNodes = (int)Math.pow(2,--levels);
-                    for(int k = 0; k < numberOfNodes ; k++){
-                        desrializedVersionInfo.add(upperLevelIndex+k,(short)0);
+                    int numberOfNodes = (int) Math.pow(2, --levels);
+                    for (int k = 0; k < numberOfNodes; k++) {
+                        desrializedVersionInfo.add(upperLevelIndex + k, (short) 0);
                     }
-                    upperLevelIndex = (upperLevelIndex-1) / 2;
+                    upperLevelIndex = (upperLevelIndex - 1) / 2;
                 }
-                desrializedVersionInfo.add(upperLevelIndex,(short)0);
+                desrializedVersionInfo.add(upperLevelIndex, (short) 0);
             } else {
-                int upperLevelIndex = (desrializedVersionInfo.size()-1)/2;
+                int upperLevelIndex = (desrializedVersionInfo.size() - 1) / 2;
                 while (upperLevelIndex > 0) {
-                    desrializedVersionInfo.set(upperLevelIndex, (short)(desrializedVersionInfo.get(upperLevelIndex) + 1));
-                    upperLevelIndex = (upperLevelIndex-1) / 2;
+                    desrializedVersionInfo.set(upperLevelIndex, (short) (desrializedVersionInfo.get(upperLevelIndex) + 1));
+                    upperLevelIndex = (upperLevelIndex - 1) / 2;
                 }
-                desrializedVersionInfo.set(upperLevelIndex, (short)(desrializedVersionInfo.get(upperLevelIndex) + 1));
+                desrializedVersionInfo.set(upperLevelIndex, (short) (desrializedVersionInfo.get(upperLevelIndex) + 1));
             }
-            desrializedVersionInfo.add((short)0);
+            desrializedVersionInfo.add((short) 0);
+            // Create a new version
+            EventsVersion eventsVersion1 = new EventsVersion();
+            eventsVersion1.setCreatedDate(new Date());
+            eventsVersion1.setLeavesCount(leavesCount);
+            eventsVersion1.setEventStoreId(eventStoreId);
+            eventsVersion1.setVersionInfo(SerializationUtils.serialize(desrializedVersionInfo));
+            EventsVersion storedEventsVersion = eventsVersionRepository.save(eventsVersion1);
+
             Update update = new Update();
-            update.addToSet(EVENTS, event);
+            update.addToSet(EVENTS, event).set("latestVersion", storedEventsVersion.getId());
             mongoTemplate.updateFirst(Query.query(Criteria.where("_id").is(eventStoreId)), update, EVENTS_STORE);
         }
-        System.out.println(desrializedVersionInfo.size());
-        // Create a new version
-        EventsVersion eventsVersion1 = new EventsVersion();
-        eventsVersion1.setCreatedDate(new Date());
-        eventsVersion1.setLeavesCount(leavesCount);
-        eventsVersion1.setEventStoreId(eventStoreId);
-        eventsVersion1.setVersionInfo(SerializationUtils.serialize(desrializedVersionInfo));
-        eventsVersionRepository.save(eventsVersion1);
     }
 
     @Override
@@ -171,25 +179,25 @@ public class MerkleServiceImpl implements IMerkleService {
         // leaves count
         eventsVersion.setLeavesCount(events.size());
         // set version Id
-        eventsVersion.setId(versionId);
         eventsVersion.setCreatedDate(new Date());
-        eventsVersionRepository.save(eventsVersion);
-        System.out.println(versionInfo);
+        EventsVersion storedVersion = eventsVersionRepository.save(eventsVersion);
+
         // Events Store
         EventsStore eventsStore = new EventsStore();
         eventsStore.setEvents(events);
         eventsStore.setId(eventsStoreId);
+        eventsStore.setLatestVersion(storedVersion.getId());
         eventsStoreRepository.save(eventsStore);
     }
 
     @Override
     public Difference getUpdates(String eventsStoreId, String versionId) {
         Optional<EventsVersion> latestEventsVersion = eventsVersionRepository.findTop1ByEventStoreIdOrderByCreatedDateDesc(eventsStoreId);
-        if(!latestEventsVersion.isPresent()){
+        if (!latestEventsVersion.isPresent()) {
             return null;
         }
         Optional<EventsVersion> givenEventsVersion = eventsVersionRepository.findByEventStoreIdAndId(eventsStoreId, versionId);
-        if(!givenEventsVersion.isPresent()) {
+        if (!givenEventsVersion.isPresent()) {
             Difference difference = new Difference();
             difference.setUpdated(eventsStoreRepository.findEventIdById(eventsStoreId).get().getEvents().stream().filter(x -> !x.isRemoved()).map(y -> y.getId()).collect(Collectors.toList()));
             difference.setVersionId(latestEventsVersion.get().getId());
@@ -199,36 +207,36 @@ public class MerkleServiceImpl implements IMerkleService {
         List<Short> givenVersionInfo = (List<Short>) SerializationUtils.deserialize(givenEventsVersion.get().getVersionInfo());
         MerkleTree latestVersion = constructTree(latestVersionInfo, latestEventsVersion.get().getLeavesCount());
         MerkleTree givenVersion = constructTree(givenVersionInfo, givenEventsVersion.get().getLeavesCount());
-        return compare(givenVersion,latestVersion,eventsStoreId);
+        return compare(givenVersion, latestVersion, eventsStoreId);
     }
 
-    private Difference compare(MerkleTree givenVersion, MerkleTree latestVersion,String eventsStoreId) {
-        int latestVersionLevels  = levels(latestVersion.getLeavesCount());
-        int givenVersionLevels  = levels(givenVersion.getLeavesCount());
-        int levelDifference = latestVersionLevels-givenVersionLevels;
+    private Difference compare(MerkleTree givenVersion, MerkleTree latestVersion, String eventsStoreId) {
+        int latestVersionLevels = levels(latestVersion.getLeavesCount());
+        int givenVersionLevels = levels(givenVersion.getLeavesCount());
+        int levelDifference = latestVersionLevels - givenVersionLevels;
         List<Integer> indexes = new LinkedList<>();
         Node latestVersionRoot = latestVersion.getRoot();
-        if(levelDifference > 0) {
-            indexes = IntStream.range((int) (Math.pow(2, givenVersionLevels)), latestVersion.getLeavesCount()).collect(LinkedList::new, LinkedList::add, LinkedList::addAll);
+        if (levelDifference > 0) {
+            indexes = IntStream.range((int) (Math.pow(2, givenVersionLevels)), latestVersion.getLeavesCount()).collect(ArrayList::new, ArrayList::add, ArrayList::addAll);
             while (levelDifference > 0) {
                 latestVersionRoot = latestVersionRoot.getLeft();
-                levelDifference --;
+                levelDifference--;
             }
         }
-        compareLevelTree(givenVersion.getRoot(), latestVersionRoot,indexes);
+        compareLevelTree(givenVersion.getRoot(), latestVersionRoot, indexes);
         Difference difference = new Difference();
         MatchOperation selectCustomer = Aggregation.match(Criteria.where("_id").is(eventsStoreId));
         UnwindOperation unwindOperation = Aggregation.unwind("events", "indexOfElement");
         MatchOperation matchOperation = Aggregation.match(Criteria.where("indexOfElement").in(indexes));
         ProjectionOperation project = Aggregation.project().and("events._id").as("eventId").andExclude("_id").and("events.removed").as("eventRemoved");
-        List<Document> documents = mongoTemplate.aggregate(Aggregation.newAggregation(selectCustomer,unwindOperation,matchOperation,project),"EventsStore",Document.class).getMappedResults();
+        List<Document> documents = mongoTemplate.aggregate(Aggregation.newAggregation(selectCustomer, unwindOperation, matchOperation, project), "EventsStore", Document.class).getMappedResults();
         List<String> deletedIds = new ArrayList<>();
         List<String> updatedIds = new ArrayList<>();
-        documents.stream().forEach( y -> {
-            if((Boolean) y.get("eventRemoved")) {
-                deletedIds.add((String)y.get("eventId"));
+        documents.stream().forEach(y -> {
+            if ((Boolean) y.get("eventRemoved")) {
+                deletedIds.add((String) y.get("eventId"));
             } else {
-                updatedIds.add((String)y.get("eventId"));
+                updatedIds.add((String) y.get("eventId"));
             }
         });
         difference.setUpdated(updatedIds);
@@ -236,32 +244,32 @@ public class MerkleServiceImpl implements IMerkleService {
         return difference;
     }
 
-    private void compareLevelTree(Node root, Node latestVersionRoot,List<Integer> indexes) {
-        if(latestVersionRoot != null && root == null) {
+    private void compareLevelTree(Node root, Node latestVersionRoot, List<Integer> indexes) {
+        if (latestVersionRoot != null && root == null) {
             indexes.add(latestVersionRoot.getIndex());
             return;
         }
-        if(latestVersionRoot == null || root == null) {
+        if (latestVersionRoot == null || root == null) {
             return;
         }
-        if(root.getVersion().equals(latestVersionRoot.getVersion())) {
+        if (root.getVersion().equals(latestVersionRoot.getVersion())) {
             return;
         } else {
-            if(latestVersionRoot.getLeft() == null && latestVersionRoot.getRight() == null) {
+            if (latestVersionRoot.getLeft() == null && latestVersionRoot.getRight() == null) {
                 indexes.add(latestVersionRoot.getIndex());
                 return;
             }
         }
-        compareLevelTree(root.getLeft(),latestVersionRoot.getLeft(),indexes);
-        compareLevelTree(root.getRight(),latestVersionRoot.getRight(),indexes);
+        compareLevelTree(root.getLeft(), latestVersionRoot.getLeft(), indexes);
+        compareLevelTree(root.getRight(), latestVersionRoot.getRight(), indexes);
     }
 
     private int levels(int eventsSize) {
         return (int) Math.ceil(log2(eventsSize));
     }
 
-    private double log2(int eventsSize){
-        return  Math.log10(eventsSize) / Math.log10(2);
+    private double log2(int eventsSize) {
+        return Math.log10(eventsSize) / Math.log10(2);
     }
 
 }

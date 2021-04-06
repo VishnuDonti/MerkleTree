@@ -18,4 +18,6 @@ public class EventsStore extends  AbstractDocument {
     // List of the events for the customer
     private List<Event> events;
 
+    private String latestVersion;
+
 }
